@@ -104,6 +104,25 @@ Re-running it upgrades the binary in place. `sudo telltale self-update --restart
 
 Then point your router's DHCP DNS server setting at the Pi's address so every device uses it.
 
+## NixOS
+The flake provides `nixosModules.telltale` and an overlay with `pkgs.telltale`.
+```nix
+{
+  inputs.telltale.url = "github:paimonsoror/telltaledns";
+
+  outputs = { self, nixpkgs, telltale }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        telltale.nixosModules.telltale
+        { services.telltale.enable = true; }
+      ];
+    };
+  };
+}
+```
+`services.telltale.settings` is written to `/etc/telltale/telltale.toml`; `services.telltale.configFile` uses an existing file instead. The module creates a `telltale` user, opens port 53 when `openFirewall` is set, and can disable systemd-resolved's stub listener with `disableResolvedStub`. Bootstrap admin credentials come from files passed as systemd credentials (`bootstrapAdmin.passwordFile` or `passwordHashFile`). See `docs/nixos.md` for the full options.
+
 ## Moving from Pi-hole
 `telltale import pihole PATH -o pihole.toml` turns a Pi-hole setup into TelltaleDNS configuration. PATH is a Teleporter export (Settings → Teleporter → Export: a `.zip` from Pi-hole v6, a `.tar.gz` from v5), a `gravity.db`, or a copy of `/etc/pihole`. The output is checked to load before it's written.
 

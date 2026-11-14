@@ -1,3 +1,5 @@
+/result
+/result-*
 /target
 **/*.rs.bk
 /bench/results/
