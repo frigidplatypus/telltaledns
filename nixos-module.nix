@@ -333,9 +333,12 @@ in
       };
     };
 
-    users.groups = lib.mkIf cfg.createUser {
+    users.groups = lib.mkIf cfg.createUser ({
       ${cfg.group} = { };
-    };
+    } // lib.optionalAttrs hasTailscaleRouter {
+      # Tailscale may tighten /run/tailscale/tailscaled.sock permissions in the future.
+      tailscale = { };
+    });
 
     environment.etc."telltale/telltale.toml".source = configFile;
 
@@ -343,8 +346,10 @@ in
       description = "TelltaleDNS resolver";
       documentation = [ "https://github.com/paimonsoror/telltaledns/blob/main/docs/running.md" ];
       wantedBy = [ "multi-user.target" ];
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
+      after = [ "network-online.target" ]
+        ++ lib.optional (hasTailscaleRouter && config.services.tailscale.enable) "tailscaled.service";
+      wants = [ "network-online.target" ]
+        ++ lib.optional (hasTailscaleRouter && config.services.tailscale.enable) "tailscaled.service";
 
       serviceConfig = {
         Type = "simple";
