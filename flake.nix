@@ -31,7 +31,20 @@
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "telltale";
             inherit version;
-            src = ./.;
+            src = lib.cleanSourceWith {
+              src = ./.;
+              filter = path: type:
+                let
+                  rel = lib.removePrefix (toString ./. + "/") (toString path);
+                in
+                lib.any (prefix: lib.hasPrefix prefix rel) [
+                  "Cargo.toml"
+                  "Cargo.lock"
+                  "crates"
+                  "presets"
+                  "rust-toolchain.toml"
+                ];
+            };
 
             cargoLock = {
               lockFile = ./Cargo.lock;

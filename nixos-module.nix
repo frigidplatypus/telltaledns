@@ -10,15 +10,42 @@ let
     then cfg.configFile
     else settingsFormat.generate "telltale.toml" effectiveSettings;
 
-  effectiveSettings = lib.recursiveUpdate {
+  clusterListen = "${cfg.cluster.listenAddress}:${toString cfg.cluster.port}";
+
+  clusterBase = lib.optionalAttrs cfg.cluster.enable {
+    cluster = {
+      name = cfg.cluster.name;
+      site = cfg.cluster.site;
+      listen = clusterListen;
+      eligible = cfg.cluster.eligible;
+      config_source = if cfg.cluster.configAuthority == "gitops" then "gitops" else "file";
+    }
+    // lib.optionalAttrs (cfg.cluster.bootstrapSecretFile != null) {
+      bootstrap_secret_file = "/run/credentials/telltale.service/bootstrap-secret";
+    }
+    // lib.optionalAttrs (cfg.cluster.role == "primary") {
+      init = {
+        advertise = cfg.cluster.advertise;
+        config_authority = cfg.cluster.configAuthority;
+      };
+    }
+    // lib.optionalAttrs (cfg.cluster.role == "replica") {
+      join_url = cfg.cluster.joinUrl;
+      ephemeral = cfg.cluster.ephemeral;
+    };
+  };
+
+  effectiveSettings = lib.recursiveUpdate ({
     config_version = 1;
     node.data_dir = cfg.dataDir;
-  } cfg.settings;
+  } // clusterBase) cfg.settings;
 
   isDefaultDataDir = cfg.dataDir == "/var/lib/telltale";
 
   loadCredentials =
-    lib.optional (cfg.bootstrapAdmin.passwordFile != null)
+    lib.optional (cfg.cluster.bootstrapSecretFile != null)
+      "bootstrap-secret:${cfg.cluster.bootstrapSecretFile}"
+    ++ lib.optional (cfg.bootstrapAdmin.passwordFile != null)
       "admin-password:${cfg.bootstrapAdmin.passwordFile}"
     ++ lib.optional (cfg.bootstrapAdmin.passwordHashFile != null)
       "admin-password-hash:${cfg.bootstrapAdmin.passwordHashFile}";
@@ -141,6 +168,99 @@ in
       '';
     };
 
+    cluster = {
+      enable = lib.mkEnableOption "TelltaleDNS cluster membership";
+
+      name = lib.mkOption {
+        type = lib.types.str;
+        default = "telltale";
+        description = "Cluster name.";
+      };
+
+      site = lib.mkOption {
+        type = lib.types.str;
+        default = config.networking.hostName;
+        description = "Site label for this node (shown in the cluster UI).";
+      };
+
+      role = lib.mkOption {
+        type = lib.types.enum [ "primary" "replica" ];
+        default = "primary";
+        description = ''
+          Whether this node creates the cluster (`primary`) or joins an existing
+          one (`replica`).
+        '';
+      };
+
+      listenAddress = lib.mkOption {
+        type = lib.types.str;
+        default = "0.0.0.0";
+        description = "Address the cluster replication port listens on.";
+      };
+
+      port = lib.mkOption {
+        type = lib.types.port;
+        default = 8443;
+        description = "Cluster replication port.";
+      };
+
+      advertise = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          URLs other nodes use to reach this primary. Required when `role` is
+          `primary`.
+        '';
+      };
+
+      joinUrl = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = ''
+          Primary URL a replica joins (`https://primary:8443`). Required when
+          `role` is `replica`.
+        '';
+      };
+
+      bootstrapSecretFile = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = ''
+          Path to a shared secret used for declarative joining. It is passed to
+          the service as a systemd credential. Must be the same file on every
+          node. Use at least 32 random characters.
+        '';
+      };
+
+      eligible = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Whether this node may be promoted to primary. Ephemeral replicas
+          should set this to false.
+        '';
+      };
+
+      ephemeral = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Join as an ephemeral member (never primary, never a voter). Use for
+          resolver-only replicas.
+        '';
+      };
+
+      configAuthority = lib.mkOption {
+        type = lib.types.enum [ "api" "gitops" ];
+        default = "api";
+        description = ''
+          Where the cluster's shared configuration comes from. `api` means the
+          primary's own file/UI; `gitops` means a Git repository configured in
+          `services.telltale.settings.cluster.git`.
+        '';
+      };
+    };
+
     bootstrapAdmin = {
       user = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -185,6 +305,18 @@ in
       {
         assertion = cfg.bootstrapAdmin.passwordFile == null || cfg.bootstrapAdmin.passwordHashFile == null;
         message = "services.telltale.bootstrapAdmin: set at most one of passwordFile and passwordHashFile.";
+      }
+      {
+        assertion = !cfg.cluster.enable || cfg.cluster.role == "replica" || cfg.cluster.advertise != [ ];
+        message = "services.telltale.cluster.advertise must contain at least one URL when role is primary.";
+      }
+      {
+        assertion = !cfg.cluster.enable || cfg.cluster.role == "primary" || cfg.cluster.joinUrl != null;
+        message = "services.telltale.cluster.joinUrl is required when role is replica.";
+      }
+      {
+        assertion = !cfg.cluster.enable || cfg.cluster.role == "primary" || cfg.cluster.bootstrapSecretFile != null;
+        message = "services.telltale.cluster.bootstrapSecretFile is required when role is replica.";
       }
     ];
 
@@ -273,7 +405,7 @@ in
 
     networking.firewall = lib.mkIf cfg.openFirewall {
       allowedUDPPorts = [ 53 ] ++ cfg.extraFirewallPorts;
-      allowedTCPPorts = [ 53 ] ++ cfg.extraFirewallPorts;
+      allowedTCPPorts = [ 53 ] ++ cfg.extraFirewallPorts ++ lib.optional cfg.cluster.enable cfg.cluster.port;
     };
 
     services.resolved.extraConfig = lib.mkIf cfg.disableResolvedStub "DNSStubListener=no\n";

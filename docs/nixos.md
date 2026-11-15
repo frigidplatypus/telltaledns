@@ -68,7 +68,75 @@ services.telltale.disableResolvedStub = true;
 
 This writes `DNSStubListener=no` to the resolved configuration.
 
-## Firewall
+## Cluster
 
-`services.telltale.openFirewall = true` opens port 53 on UDP and TCP. Add extra
-ports (for example the API listener) with `services.telltale.extraFirewallPorts`.
+The module can configure a cluster declaratively using TelltaleDNS's automatic
+bootstrap options (`[cluster.init]` and `[cluster.join_url]`). The shared secret
+is passed as a systemd credential, so it never enters the Nix store.
+
+Generate or provision the same secret file on every node (for example with
+[sops-nix](https://github.com/Mic92/sops-nix)):
+
+```nix
+sops.secrets.telltale-bootstrap-secret = {
+  sopsFile = ./secrets/telltale.yaml;
+  owner = config.services.telltale.user;
+};
+```
+
+### Primary
+
+The primary creates the cluster on first start and owns the shared configuration:
+
+```nix
+services.telltale = {
+  enable = true;
+  openFirewall = true;
+
+  cluster = {
+    enable = true;
+    role = "primary";
+    name = "home";
+    site = "livingroom";
+    advertise = [ "https://192.168.1.2:8443" ];
+    bootstrapSecretFile = config.sops.secrets.telltale-bootstrap-secret.path;
+  };
+
+  # shared configuration — replicas will receive all of this
+  settings = {
+    upstream = [
+      { name = "cloudflare"; url = "tls://1.1.1.1:853"; tls_server_name = "cloudflare-dns.com"; }
+    ];
+    upstream_group = [ { name = "default"; members = [ "cloudflare" ]; strategy = "fastest"; } ];
+    group = [ { name = "default"; lists = [ "hagezi-pro" ]; } ];
+  };
+};
+```
+
+### Replica
+
+The replica joins the primary on first start using the same bootstrap secret:
+
+```nix
+services.telltale = {
+  enable = true;
+  openFirewall = true;
+
+  cluster = {
+    enable = true;
+    role = "replica";
+    name = "home";
+    site = "office";
+    joinUrl = "https://192.168.1.2:8443";
+    bootstrapSecretFile = config.sops.secrets.telltale-bootstrap-secret.path;
+  };
+
+  # shared sections are ignored once joined; leave settings at the defaults
+  # or override only per-node sections like [node] and [[listen]].
+};
+```
+
+Notes:
+- The cluster replication port (`8443/tcp`) is opened automatically when clustering is enabled.
+- Two nodes alone cannot do automatic failover. Add a small witness node or a third eligible node, or promote the replica manually with `telltale cluster promote` if the primary fails.
+- Set `cluster.configAuthority = "gitops"` and `settings.cluster.git` to keep the shared configuration in a Git repository instead of the primary's NixOS config.
