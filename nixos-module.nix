@@ -40,6 +40,9 @@ let
     node.data_dir = cfg.dataDir;
   } // clusterBase) cfg.settings;
 
+  hasTailscaleRouter =
+    lib.any (r: (r.type or null) == "tailscale") (cfg.settings.router or [ ]);
+
   isDefaultDataDir = cfg.dataDir == "/var/lib/telltale";
 
   loadCredentials =
@@ -326,6 +329,7 @@ in
         inherit (cfg) group;
         home = cfg.dataDir;
         description = "TelltaleDNS service user";
+        extraGroups = lib.optional hasTailscaleRouter "tailscale";
       };
     };
 

@@ -61,6 +61,7 @@ Byte sizes accept an integer number of bytes or a string with a unit: `"32MiB"`,
 | `[[upstream]]` | upstream resolvers; the URL scheme picks the protocol | `spec/04` |
 | `[[upstream_group]]` | named sets of upstreams with a strategy (`failover`, `round_robin`, `weighted`, `fastest`, `parallel`). Queries that match no route use the group named `default` | `spec/04` §4 |
 | `[[route]]` | conditional forwarding by domain suffix, client group, or query type | `spec/04` §1 |
+| `[[router]]` | device naming sources: UniFi/OPNsense DHCP clients, or the local Tailscale daemon's peer list | `docs/running.md`, API-010 |
 | `[[record]]` | local records (A, AAAA, CNAME, PTR, TXT, MX, SRV; `*.` wildcards) | `docs/running.md` |
 | `[local]` | hosts files to import, automatic PTRs, default TTL for local records | `docs/running.md` |
 | `[[list]]` | filter lists: a `url`, a local `path`, or inline `rules`; `kind` (`block`/`allow`), `match` (`subtree`/`exact`), `mode` (`enforce`/`shadow`: counted, never blocks), per-list refresh, size limit, and `stale_after_days` | `docs/running.md` |

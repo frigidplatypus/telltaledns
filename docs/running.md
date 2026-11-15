@@ -1229,7 +1229,7 @@ window = [{ days = ["weekdays"], start = "08:00", end = "15:00" }]
 - The Groups page shows each group's schedules and which are **on now**; the query log shows blocks as **schedule**.
 - **In the UI:** **Groups → Schedules** adds, changes, or removes schedules (windows one per line, like `weekdays 21:00-07:00`), and a group's editor picks the schedules it follows. Through the API: `PUT`/`DELETE /api/v1/schedules/{name}` with the same fields as `[[schedule]]` (agents need `config:write:groups`, and AI agents can plan one with the MCP tool `plan_set_schedule`).
 
-### Names from your router (UniFi, OPNsense)
+### Names from your router (UniFi, OPNsense, Tailscale)
 TelltaleDNS doesn't hand out addresses: your router's DHCP does that, and TelltaleDNS can read its client list, so devices show up by name:
 ```toml
 [[router]]
@@ -1249,10 +1249,16 @@ type = "opnsense"
 url = "https://opnsense.lan"
 api_key_file = "/etc/telltale/opn-key"     # System → Access → Users → API keys
 api_secret_file = "/etc/telltale/opn-secret"
+
+[[router]]
+name = "tailnet"
+type = "tailscale"                     # read the local tailscaled peer list
+# socket_path = "/var/run/tailscale/tailscaled.sock"   # default on Linux
 ```
-- UniFi: the connected clients, named by the alias you gave them in UniFi, else their host name. OPNsense: the DHCP leases (Dnsmasq, Kea, or ISC, whichever is running).
+- UniFi: the connected clients, named by the alias you gave them in UniFi, else their host name. OPNsense: the DHCP leases (Dnsmasq, Kea, or ISC, whichever is running). Tailscale: the `100.64.x.x` IPv4 addresses of your tailnet peers, named by their Tailscale host name (or DNS name if the host name is empty).
 - A self-signed console: save its certificate (`openssl s_client -connect 192.168.1.1:443 </dev/null | openssl x509 > udm.pem`) as `tls_ca`. Its certificate names `unifi.local`, not the address you reach it at, so set `tls_server_name` to the name in it (`openssl x509 -in udm.pem -noout -ext subjectAltName` shows it): the console is then verified, and only that certificate is trusted. `tls_insecure_skip_verify = true` also works, but then anything on your network could pose as the console and receive the API key.
 - Read every `interval_secs` (300); a router that doesn't answer is asked again after 15 seconds and keeps its last list meanwhile.
+- Tailscale: the `telltale` process needs read access to `tailscaled.sock`. On NixOS add the `telltale` user to the `tailscale` group; on other systems the socket is usually root-owned and the service runs as the `telltale` user with access via group membership.
 - Names you give devices in TelltaleDNS win; then the routers'. `GET /api/v1/dhcp/leases` lists them (`source = router`).
 - Credentials stay in files, out of the configuration. Changes to `[[router]]` need a restart.
 - In a cluster, only one node needs to read the router (or hear mDNS). Every node asks the others for the device names they know, once a minute, so a resolver pod without the router's key names devices the same way the primary does.

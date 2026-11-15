@@ -68,6 +68,23 @@ services.telltale.disableResolvedStub = true;
 
 This writes `DNSStubListener=no` to the resolved configuration.
 
+## Tailscale device names
+
+TelltaleDNS can read the local `tailscaled` peer list and name Tailscale devices
+by their host names:
+
+```nix
+services.telltale.settings.router = [
+  { name = "tailnet"; type = "tailscale"; }
+];
+
+# If you use a non-standard socket path:
+# { name = "tailnet"; type = "tailscale"; socket_path = "/run/tailscale/tailscaled.sock"; }
+```
+
+The module automatically adds the `telltale` user to the `tailscale` group so it
+can reach `tailscaled.sock`. Tailscale must be enabled separately (`services.tailscale.enable = true`).
+
 ## Cluster
 
 The module can configure a cluster declaratively using TelltaleDNS's automatic
