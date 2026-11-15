@@ -12,13 +12,15 @@
 //! Never on the DNS path; a router that's down keeps its last answer and is logged.
 
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use serde_json::Value;
 use telltale_config::{RouterConfig, RouterKind};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 use tracing::{info, warn};
 
 use crate::devices::{Lease, Leases};
@@ -235,6 +237,79 @@ async fn poll_opnsense(
     Err(format!("no DHCP lease API answered ({last})"))
 }
 
+/// Tailscale peers in a `/localapi/v0/status` answer.
+pub(crate) fn tailscale_clients(v: &Value) -> Seen {
+    let mut seen = Vec::new();
+    collect_tailscale_node(v.get("Self"), &mut seen);
+    if let Some(peers) = v.get("Peer").and_then(Value::as_object) {
+        for peer in peers.values() {
+            collect_tailscale_node(Some(peer), &mut seen);
+        }
+    }
+    seen
+}
+
+fn collect_tailscale_node(node: Option<&Value>, seen: &mut Seen) {
+    let Some(node) = node else {
+        return;
+    };
+    let hostname = ["HostName", "DNSName"]
+        .iter()
+        .filter_map(|k| node.get(*k).and_then(Value::as_str))
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(str::to_owned);
+    let Some(ips) = node.get("TailscaleIPs").and_then(Value::as_array) else {
+        return;
+    };
+    for ip in ips.iter().filter_map(Value::as_str) {
+        if let Ok(IpAddr::V4(v4)) = ip.parse() {
+            seen.push((String::new(), v4, hostname.clone()));
+        }
+    }
+}
+
+/// Read a JSON response from tailscaled's local API over its Unix socket.
+async fn localapi_get(socket_path: &str, path: &str) -> Result<Value, String> {
+    let mut stream = UnixStream::connect(socket_path)
+        .await
+        .map_err(|e| format!("{socket_path}: {e}"))?;
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: local-tailscaled.sock\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| format!("{socket_path}: write: {e}"))?;
+    let mut buf = Vec::new();
+    stream
+        .read_to_end(&mut buf)
+        .await
+        .map_err(|e| format!("{socket_path}: read: {e}"))?;
+    let header_end = buf
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .ok_or_else(|| "{socket_path}: malformed HTTP response".to_string())?;
+    let status_end = buf
+        .iter()
+        .position(|&b| b == b'\r')
+        .unwrap_or(buf.len());
+    let status_line = std::str::from_utf8(&buf[..status_end])
+        .map_err(|_| "{socket_path}: invalid status line".to_string())?;
+    let status = status_line.split_whitespace().nth(1).unwrap_or("");
+    if status != "200" {
+        return Err(format!("{socket_path}: HTTP {status}"));
+    }
+    serde_json::from_slice(&buf[header_end + 4..])
+        .map_err(|e| format!("{socket_path}: json: {e}"))
+}
+
+/// One poll of the local tailscaled daemon.
+async fn poll_tailscale(c: &RouterConfig) -> Result<Seen, String> {
+    let v = localapi_get(c.socket_path.as_str(), "/localapi/v0/status").await?;
+    Ok(tailscale_clients(&v))
+}
+
 /// The leases view from every router's last answer.
 fn rebuild(parts: &HashMap<String, Seen>, view: &ArcSwap<Leases>) {
     let mut m = Leases::new();
@@ -277,38 +352,43 @@ pub(crate) async fn run(
         .unwrap_or(300);
     loop {
         for r in &routers {
-            let client = if r.tls_insecure_skip_verify {
-                telltale_filter::fetch::Client::insecure(Arc::clone(&resolver))
-            } else if let Some(p) = &r.tls_ca {
-                telltale_filter::fetch::Client::with_ca_file(Arc::clone(&resolver), p.as_str())
+            let result = if r.kind == RouterKind::Tailscale {
+                poll_tailscale(r).await
             } else {
-                telltale_filter::fetch::Client::new(Arc::clone(&resolver), &[])
-            };
-            // Like a failed poll, a TLS setting that can't load (a node without the CA file, ADR-120)
-            // is logged once until it works.
-            let client = match client {
-                Ok(c) => c,
-                Err(e) => {
-                    if !failing.get(r.name.as_str()).copied().unwrap_or(false) {
-                        if resolver_pod {
-                            info!(router = %r.name, error = %e, "router integration: TLS settings (not on this resolver pod; the controller reads the router)");
-                        } else {
-                            warn!(router = %r.name, error = %e, "router integration: TLS settings");
+                let client = if r.tls_insecure_skip_verify {
+                    telltale_filter::fetch::Client::insecure(Arc::clone(&resolver))
+                } else if let Some(p) = &r.tls_ca {
+                    telltale_filter::fetch::Client::with_ca_file(Arc::clone(&resolver), p.as_str())
+                } else {
+                    telltale_filter::fetch::Client::new(Arc::clone(&resolver), &[])
+                };
+                // Like a failed poll, a TLS setting that can't load (a node without the CA file, ADR-120)
+                // is logged once until it works.
+                let client = match client {
+                    Ok(c) => c,
+                    Err(e) => {
+                        if !failing.get(r.name.as_str()).copied().unwrap_or(false) {
+                            if resolver_pod {
+                                info!(router = %r.name, error = %e, "router integration: TLS settings (not on this resolver pod; the controller reads the router)");
+                            } else {
+                                warn!(router = %r.name, error = %e, "router integration: TLS settings");
+                            }
                         }
+                        failing.insert(r.name.to_string(), true);
+                        continue;
                     }
-                    failing.insert(r.name.to_string(), true);
-                    continue;
+                };
+                // REQ: T8.2 — a console whose certificate names something other than `url`'s host.
+                let client = client.with_server_name(
+                    r.tls_server_name
+                        .as_ref()
+                        .map(telltale_config::SafeString::as_str),
+                );
+                match r.kind {
+                    RouterKind::Unifi => poll_unifi(&client, r).await,
+                    RouterKind::Opnsense => poll_opnsense(&client, r).await,
+                    RouterKind::Tailscale => unreachable!(),
                 }
-            };
-            // REQ: T8.2 — a console whose certificate names something other than `url`'s host.
-            let client = client.with_server_name(
-                r.tls_server_name
-                    .as_ref()
-                    .map(telltale_config::SafeString::as_str),
-            );
-            let result = match r.kind {
-                RouterKind::Unifi => poll_unifi(&client, r).await,
-                RouterKind::Opnsense => poll_opnsense(&client, r).await,
             };
             let was_failing = failing.get(r.name.as_str()).copied().unwrap_or(false);
             match result {
@@ -399,5 +479,60 @@ mod tests {
             vec![("00:11:22:33:44:66".into(), Ipv4Addr::new(10, 0, 0, 6), None)]
         );
         assert_eq!(base64(b"key:secret"), "a2V5OnNlY3JldA==");
+    }
+
+    /// REQ: T8.2 — Tailscale local API status: IPv4 Tailscale IPs are named by HostName, with
+    /// DNSName as a fallback; IPv6 IPs are ignored until the device table supports them.
+    #[test]
+    fn tailscale_clients_named() {
+        let v = serde_json::json!({
+            "Self": {
+                "HostName": "home-dns",
+                "DNSName": "home-dns.tail1234.ts.net",
+                "TailscaleIPs": ["100.64.0.1", "fd7a:115c:a1e0::1"]
+            },
+            "Peer": {
+                "abc123": {
+                    "HostName": "alice-phone",
+                    "DNSName": "alice-phone.tail1234.ts.net",
+                    "TailscaleIPs": ["100.64.0.2", "100.64.0.3"]
+                },
+                "def456": {
+                    "DNSName": "printer.tail1234.ts.net",
+                    "TailscaleIPs": ["100.64.0.4"]
+                }
+            }
+        });
+        assert_eq!(
+            tailscale_clients(&v),
+            vec![
+                (
+                    String::new(),
+                    Ipv4Addr::new(100, 64, 0, 1),
+                    Some("home-dns".into())
+                ),
+                (
+                    String::new(),
+                    Ipv4Addr::new(100, 64, 0, 2),
+                    Some("alice-phone".into())
+                ),
+                (
+                    String::new(),
+                    Ipv4Addr::new(100, 64, 0, 3),
+                    Some("alice-phone".into())
+                ),
+                (
+                    String::new(),
+                    Ipv4Addr::new(100, 64, 0, 4),
+                    Some("printer.tail1234.ts.net".into())
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn tailscale_clients_no_peers() {
+        let v = serde_json::json!({"Self": {"TailscaleIPs": []}});
+        assert!(tailscale_clients(&v).is_empty());
     }
 }

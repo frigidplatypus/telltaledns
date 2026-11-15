@@ -1134,18 +1134,26 @@ const fn default_zone_negative_ttl() -> u32 {
     300
 }
 
-/// REQ: T8.2 — a router whose DHCP clients name devices.
+fn default_tailscale_socket() -> SafeString {
+    SafeString::from("/var/run/tailscale/tailscaled.sock")
+}
+
+/// REQ: T8.2 — a router (or local Tailscale daemon) whose clients name devices.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RouterConfig {
     /// Unique name (logs, the leases' source).
     pub name: SafeString,
-    /// `unifi` (UniFi OS consoles and the Network application) or `opnsense`.
+    /// `unifi` (UniFi OS consoles and the Network application), `opnsense`, or `tailscale`.
     #[serde(rename = "type")]
     pub kind: RouterKind,
     /// The console or controller: `https://192.168.1.1` (UniFi OS), `https://controller:8443`
-    /// (Network application), `https://opnsense.lan`.
+    /// (Network application), `https://opnsense.lan`. Not used for `tailscale`.
+    #[serde(default)]
     pub url: SafeString,
+    /// Tailscale: the path to `tailscaled.sock` (default `/var/run/tailscale/tailscaled.sock`).
+    #[serde(default = "default_tailscale_socket")]
+    pub socket_path: SafeString,
     /// UniFi: the site (default `default`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<SafeString>,
@@ -1187,6 +1195,7 @@ const fn default_router_interval() -> u32 {
 pub enum RouterKind {
     Unifi,
     Opnsense,
+    Tailscale,
 }
 
 /// REQ: OBS-010 (T7.12, `spec/06` §8) — alerts: rules checked on the primary (or a standalone

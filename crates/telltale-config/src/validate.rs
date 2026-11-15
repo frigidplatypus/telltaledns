@@ -241,7 +241,9 @@ fn routers(cfg: &Config, r: &mut Report<'_>) {
         if x.name.is_empty() || !names.insert(x.name.as_str()) {
             r.err(format!("{p}.name"), "must be unique and not empty");
         }
-        if !(x.url.starts_with("https://") || x.url.starts_with("http://")) {
+        if x.kind != crate::RouterKind::Tailscale
+            && !(x.url.starts_with("https://") || x.url.starts_with("http://"))
+        {
             r.err(
                 format!("{p}.url"),
                 "an https:// URL, e.g. https://192.168.1.1",
@@ -259,6 +261,11 @@ fn routers(cfg: &Config, r: &mut Report<'_>) {
             crate::RouterKind::Opnsense => {
                 if x.api_key_file.is_none() || x.api_secret_file.is_none() {
                     r.err(p.clone(), "OPNsense needs api_key_file and api_secret_file");
+                }
+            }
+            crate::RouterKind::Tailscale => {
+                if x.socket_path.is_empty() {
+                    r.err(format!("{p}.socket_path"), "must not be empty");
                 }
             }
         }

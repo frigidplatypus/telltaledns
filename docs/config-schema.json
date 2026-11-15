@@ -3032,7 +3032,7 @@
       ]
     },
     "RouterConfig": {
-      "description": "REQ: T8.2 — a router whose DHCP clients name devices.",
+      "description": "REQ: T8.2 — a router (or local Tailscale daemon) whose clients name devices.",
       "type": "object",
       "properties": {
         "api_key_file": {
@@ -3078,6 +3078,12 @@
           ],
           "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
         },
+        "socket_path": {
+          "description": "Tailscale: the path to `tailscaled.sock` (default `/var/run/tailscale/tailscaled.sock`).",
+          "type": "string",
+          "default": "/var/run/tailscale/tailscaled.sock",
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+        },
         "tls_ca": {
           "description": "A PEM file with the console's certificate (or its CA), for self-signed consoles.",
           "type": [
@@ -3099,12 +3105,13 @@
           "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
         },
         "type": {
-          "description": "`unifi` (UniFi OS consoles and the Network application) or `opnsense`.",
+          "description": "`unifi` (UniFi OS consoles and the Network application), `opnsense`, or `tailscale`.",
           "$ref": "#/$defs/RouterKind"
         },
         "url": {
-          "description": "The console or controller: `https://192.168.1.1` (UniFi OS), `https://controller:8443`\n(Network application), `https://opnsense.lan`.",
+          "description": "The console or controller: `https://192.168.1.1` (UniFi OS), `https://controller:8443`\n(Network application), `https://opnsense.lan`. Not used for `tailscale`.",
           "type": "string",
+          "default": "",
           "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
         },
         "username": {
@@ -3119,8 +3126,7 @@
       "additionalProperties": false,
       "required": [
         "name",
-        "type",
-        "url"
+        "type"
       ]
     },
     "RouterKind": {
@@ -3128,7 +3134,8 @@
       "type": "string",
       "enum": [
         "unifi",
-        "opnsense"
+        "opnsense",
+        "tailscale"
       ]
     },
     "RuleAction": {
