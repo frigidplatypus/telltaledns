@@ -286,22 +286,88 @@ async fn localapi_get(socket_path: &str, path: &str) -> Result<Value, String> {
         .read_to_end(&mut buf)
         .await
         .map_err(|e| format!("{socket_path}: read: {e}"))?;
+    parse_http_json_response(&buf).map_err(|e| format!("{socket_path}: {e}"))
+}
+
+/// Parse a minimal HTTP/1.x response and return the JSON body.
+fn parse_http_json_response(buf: &[u8]) -> Result<Value, String> {
     let header_end = buf
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| "{socket_path}: malformed HTTP response".to_string())?;
+        .ok_or_else(|| "malformed HTTP response".to_string())?;
     let status_end = buf
         .iter()
         .position(|&b| b == b'\r')
         .unwrap_or(buf.len());
     let status_line = std::str::from_utf8(&buf[..status_end])
-        .map_err(|_| "{socket_path}: invalid status line".to_string())?;
+        .map_err(|_| "invalid status line".to_string())?;
     let status = status_line.split_whitespace().nth(1).unwrap_or("");
     if status != "200" {
-        return Err(format!("{socket_path}: HTTP {status}"));
+        return Err(format!("HTTP {status}"));
     }
-    serde_json::from_slice(&buf[header_end + 4..])
-        .map_err(|e| format!("{socket_path}: json: {e}"))
+
+    let mut content_length = None;
+    let mut chunked = false;
+    for line in std::str::from_utf8(&buf[status_end + 2..header_end])
+        .map_err(|_| "invalid headers".to_string())?
+        .split("\r\n")
+    {
+        let Some((k, v)) = line.split_once(':') else {
+            continue;
+        };
+        let k = k.trim().to_ascii_lowercase();
+        let v = v.trim().to_ascii_lowercase();
+        if k == "content-length" {
+            content_length = v.parse::<usize>().ok();
+        } else if k == "transfer-encoding" {
+            chunked = v.contains("chunked");
+        }
+    }
+
+    let body_start = header_end + 4;
+    let body = if chunked {
+        decode_chunked(buf.get(body_start..).unwrap_or(&[]))?
+    } else if let Some(n) = content_length {
+        buf.get(body_start..body_start + n)
+            .ok_or_else(|| "short response".to_string())?
+            .to_vec()
+    } else {
+        buf.get(body_start..).unwrap_or(&[]).to_vec()
+    };
+
+    serde_json::from_slice(&body).map_err(|e| format!("json: {e}"))
+}
+
+/// Decode an HTTP chunked-transfer-encoded body.
+fn decode_chunked(input: &[u8]) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < input.len() {
+        let line_end = input[i..]
+            .iter()
+            .position(|&b| b == b'\r')
+            .ok_or_else(|| "chunk: no CRLF".to_string())?;
+        if input.get(i + line_end + 1) != Some(&b'\n') {
+            return Err("chunk: bad CRLF".into());
+        }
+        let line = std::str::from_utf8(&input[i..i + line_end])
+            .map_err(|_| "chunk: bad size line".to_string())?;
+        let size_str = line.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_str, 16)
+            .map_err(|_| format!("chunk: bad size '{size_str}'"))?;
+        i += line_end + 2;
+        if size == 0 {
+            break;
+        }
+        let end = i + size;
+        out.extend_from_slice(
+            input
+                .get(i..end)
+                .ok_or_else(|| "chunk: short body".to_string())?,
+        );
+        i = end + 2;
+    }
+    Ok(out)
 }
 
 /// One poll of the local tailscaled daemon.
@@ -535,5 +601,25 @@ mod tests {
     fn tailscale_clients_no_peers() {
         let v = serde_json::json!({"Self": {"TailscaleIPs": []}});
         assert!(tailscale_clients(&v).is_empty());
+    }
+
+    #[test]
+    fn tailscale_localapi_parses_content_length() {
+        let body = br#"{"ok":true}"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            std::str::from_utf8(body).unwrap()
+        );
+        let v = parse_http_json_response(resp.as_bytes()).unwrap();
+        assert_eq!(v["ok"], true);
+    }
+
+    #[test]
+    fn tailscale_localapi_parses_chunked() {
+        // Body split across two chunks: 6 bytes "{\"ok\":" + 5 bytes "true}"
+        let resp = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n6\r\n{\"ok\":\r\n5\r\ntrue}\r\n0\r\n\r\n";
+        let v = parse_http_json_response(resp).unwrap();
+        assert_eq!(v["ok"], true);
     }
 }
