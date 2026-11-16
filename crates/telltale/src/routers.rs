@@ -313,7 +313,7 @@ async fn poll_tailscale(c: &RouterConfig) -> Result<Seen, String> {
 /// The leases view from every router's last answer.
 fn rebuild(parts: &HashMap<String, Seen>, view: &ArcSwap<Leases>) {
     let mut m = Leases::new();
-    for seen in parts.values() {
+    for (source, seen) in parts {
         for (mac, ip, name) in seen {
             m.insert(
                 *ip,
@@ -322,6 +322,7 @@ fn rebuild(parts: &HashMap<String, Seen>, view: &ArcSwap<Leases>) {
                     ip: *ip,
                     hostname: name.clone(),
                     expires: 0,
+                    source: source.clone(),
                 },
             );
         }

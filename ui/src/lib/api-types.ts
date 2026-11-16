@@ -4250,8 +4250,8 @@ export interface components {
             ip: string;
             mac: string;
             /**
-             * @description `router` (read from a `[[router]]`) or `mdns` (the name the device announces,
-             *     `[clients] mdns`; no MAC).
+             * @description The configured name of the `[[router]]` that reported it, or `mdns` for names a device
+             *     announced over mDNS (`[clients] mdns`; no MAC).
              */
             source: string;
         };
@@ -5258,8 +5258,8 @@ export interface components {
                 ip: string;
                 mac: string;
                 /**
-                 * @description `router` (read from a `[[router]]`) or `mdns` (the name the device announces,
-                 *     `[clients] mdns`; no MAC).
+                 * @description The configured name of the `[[router]]` that reported it, or `mdns` for names a device
+                 *     announced over mDNS (`[clients] mdns`; no MAC).
                  */
                 source: string;
             }[];

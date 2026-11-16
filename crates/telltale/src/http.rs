@@ -2300,6 +2300,7 @@ pub(crate) mod tests {
             ip,
             hostname: Some(name.into()),
             expires: 0,
+            source: String::new(),
         };
         let name = || crate::api_backend::device_name(&src, ip.to_ipv6_mapped().octets());
         assert_eq!(name(), None);

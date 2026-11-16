@@ -27,7 +27,7 @@
   let seen = $state<S['TopItem'][]>([]);
   // REQ: T8.2, T8.3 (T8.6) — devices found by the routers' DHCP or mDNS.
   let found = $state<S['DhcpLease'][]>([]);
-  const sourceText: Record<string, string> = { router: 'router', mdns: 'mDNS' };
+  const sourceText = (s: string) => (s === 'mdns' ? 'mDNS' : s);
   const named = (ip: string) => configured.some((c) => c.match.includes(ip));
   // REQ: OBS-025 — what each device looks like, by address.
   let identities = $state<Record<string, S['DeviceIdentity']>>({});
@@ -248,12 +248,12 @@
     <section class="card" data-testid="discovered">
       <h2>Discovered on your network</h2>
       <p class="muted small">
-        Names your router's DHCP knows (<code>[[router]]</code>: UniFi, OPNsense), or that devices announced
+        Names your router integrations know (<code>[[router]]</code>: UniFi, OPNsense, Tailscale), or that devices announced
         themselves over mDNS (<code>[clients] mdns</code>). Unnamed devices already show these names; click an address to keep
         one, change it, or put the device in a group.
       </p>
       {#if found.length === 0}
-        <p class="empty">Nothing discovered yet. Connect your router (<code>[[router]]</code>) or set <code>[clients] mdns = true</code>.</p>
+        <p class="empty">Nothing discovered yet. Connect a router (<code>[[router]]</code>), add a Tailscale router, or set <code>[clients] mdns = true</code>.</p>
       {:else}
         <div class="table-wrap">
           <table>
@@ -263,7 +263,7 @@
                 <tr>
                   <td class="mono"><ClientChip ip={l.ip} onchanged={load} /></td>
                   <td>{l.hostname ?? ''}</td>
-                  <td><span class="badge info">{sourceText[l.source] ?? l.source}</span></td>
+                  <td><span class="badge info">{sourceText(l.source)}</span></td>
                   <td class="mono small">{l.mac}</td>
                   <td class="small">{#if named(l.ip)}<strong>{l.clientName}</strong>{:else}<span class="muted">not named yet</span>{/if}</td>
                 </tr>

@@ -1745,8 +1745,8 @@ pub struct DhcpLease {
     pub client_name: Option<String>,
     /// When the router's lease ends (Unix seconds; 0 when unknown).
     pub expires_unix_seconds: u64,
-    /// `router` (read from a `[[router]]`) or `mdns` (the name the device announces,
-    /// `[clients] mdns`; no MAC).
+    /// The configured name of the `[[router]]` that reported it, or `mdns` for names a device
+    /// announced over mDNS (`[clients] mdns`; no MAC).
     pub source: String,
 }
 

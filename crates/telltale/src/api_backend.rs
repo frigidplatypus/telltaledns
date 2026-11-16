@@ -2246,7 +2246,11 @@ impl Backend for ApiBackend {
                 hostname: l.hostname.clone(),
                 client_name: device_name(&self.src, l.ip.to_ipv6_mapped().octets()),
                 expires_unix_seconds: l.expires,
-                source: "router".to_owned(),
+                source: if l.source.is_empty() {
+                    "router".to_owned()
+                } else {
+                    l.source.clone()
+                },
             })
             .collect();
         // REQ: T8.3, T8.6 — and the names devices announce over mDNS (routers win).
@@ -2261,7 +2265,11 @@ impl Backend for ApiBackend {
                 hostname: l.hostname.clone(),
                 client_name: device_name(&self.src, l.ip.to_ipv6_mapped().octets()),
                 expires_unix_seconds: 0,
-                source: "mdns".to_owned(),
+                source: if l.source.is_empty() {
+                    "mdns".to_owned()
+                } else {
+                    l.source.clone()
+                },
             });
         }
         v.sort_by_key(|l| l.ip.parse::<std::net::Ipv4Addr>().map_or(0, u32::from));

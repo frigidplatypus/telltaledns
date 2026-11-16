@@ -17,6 +17,9 @@ pub(crate) struct Lease {
     pub(crate) hostname: Option<String>,
     /// Unix seconds (0 when unknown).
     pub(crate) expires: u64,
+    /// `[[router]]` name that reported this lease, or `mdns`. Empty when unknown.
+    #[serde(default)]
+    pub(crate) source: String,
 }
 
 /// Devices by address.
@@ -119,6 +122,7 @@ mod tests {
             ip: Ipv4Addr::from(ip),
             hostname: Some(name.into()),
             expires: 0,
+            source: String::new(),
         }
     }
 

@@ -11325,7 +11325,7 @@
           },
           "source": {
             "type": "string",
-            "description": "`router` (read from a `[[router]]`) or `mdns` (the name the device announces,\n`[clients] mdns`; no MAC)."
+            "description": "The configured name of the `[[router]]` that reported it, or `mdns` for names a device\nannounced over mDNS (`[clients] mdns`; no MAC)."
           }
         }
       },
@@ -13921,7 +13921,7 @@
                 },
                 "source": {
                   "type": "string",
-                  "description": "`router` (read from a `[[router]]`) or `mdns` (the name the device announces,\n`[clients] mdns`; no MAC)."
+                  "description": "The configured name of the `[[router]]` that reported it, or `mdns` for names a device\nannounced over mDNS (`[clients] mdns`; no MAC)."
                 }
               }
             }

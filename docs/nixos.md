@@ -96,6 +96,7 @@ services.telltale.settings.router = [
 
 The module automatically adds the `telltale` user to the `tailscale` group so it
 can reach `tailscaled.sock`. Tailscale must be enabled separately (`services.tailscale.enable = true`).
+Discovered peers show up in the web UI at **Clients → Discovered**, with the router name as their source.
 
 ## Cluster
 
