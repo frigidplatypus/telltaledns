@@ -74,10 +74,16 @@ in
   options.services.telltale = {
     enable = lib.mkEnableOption "TelltaleDNS filtering DNS resolver";
 
+    withUi = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Include the web UI in the TelltaleDNS package.";
+    };
+
     package = lib.mkOption {
       type = lib.types.package;
-      default = self.packages.${pkgs.system}.default;
-      defaultText = lib.literalExpression "self.packages.${pkgs.system}.default";
+      default = if cfg.withUi then self.packages.${pkgs.system}.telltale-with-ui else self.packages.${pkgs.system}.default;
+      defaultText = lib.literalExpression "self.packages.\${pkgs.system}.default";
       description = "The TelltaleDNS package to use.";
     };
 

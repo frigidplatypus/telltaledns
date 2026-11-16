@@ -29,6 +29,18 @@ and starts a hardened systemd service that listens on UDP and TCP port 53.
 The module supplies sensible defaults (Cloudflare and Quad9 over TLS, Hagezi Pro
 blocklist, 7-day query-log retention). Override them with `services.telltale.settings`.
 
+## Web UI
+
+The default package ships without the web UI (the API still works). To embed the UI,
+set:
+
+```nix
+services.telltale.withUi = true;
+```
+
+This builds the Svelte app from `ui/` and packages a `telltale-with-ui` binary. The
+UI is then served at `/` on the API listener.
+
 ## Custom configuration
 
 ```nix
