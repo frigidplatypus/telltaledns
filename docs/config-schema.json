@@ -3036,7 +3036,7 @@
       "type": "object",
       "properties": {
         "api_key_file": {
-          "description": "UniFi: an API key (UniFi Network 9+), or OPNsense: the API key. A file holding it.",
+          "description": "UniFi: an API key (UniFi Network 9+), OPNsense: the API key, or Tailscale API: the API\naccess token. A file holding it.",
           "type": [
             "string",
             "null"
@@ -3084,6 +3084,12 @@
           "default": "/var/run/tailscale/tailscaled.sock",
           "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
         },
+        "tailnet": {
+          "description": "Tailscale API: the tailnet to list devices for (`-` for the token's default tailnet).",
+          "type": "string",
+          "default": "-",
+          "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
+        },
         "tls_ca": {
           "description": "A PEM file with the console's certificate (or its CA), for self-signed consoles.",
           "type": [
@@ -3105,11 +3111,11 @@
           "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
         },
         "type": {
-          "description": "`unifi` (UniFi OS consoles and the Network application), `opnsense`, or `tailscale`.",
+          "description": "`unifi` (UniFi OS consoles and the Network application), `opnsense`, `tailscale`, or\n`tailscale_api`.",
           "$ref": "#/$defs/RouterKind"
         },
         "url": {
-          "description": "The console or controller: `https://192.168.1.1` (UniFi OS), `https://controller:8443`\n(Network application), `https://opnsense.lan`. Not used for `tailscale`.",
+          "description": "The console or controller: `https://192.168.1.1` (UniFi OS), `https://controller:8443`\n(Network application), `https://opnsense.lan`. Not used for `tailscale` or\n`tailscale_api`.",
           "type": "string",
           "default": "",
           "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]*$"
@@ -3135,7 +3141,8 @@
       "enum": [
         "unifi",
         "opnsense",
-        "tailscale"
+        "tailscale",
+        "tailscale_api"
       ]
     },
     "RuleAction": {

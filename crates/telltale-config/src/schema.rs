@@ -1138,17 +1138,23 @@ fn default_tailscale_socket() -> SafeString {
     SafeString::from("/var/run/tailscale/tailscaled.sock")
 }
 
+fn default_tailnet() -> SafeString {
+    SafeString::from("-")
+}
+
 /// REQ: T8.2 — a router (or local Tailscale daemon) whose clients name devices.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RouterConfig {
     /// Unique name (logs, the leases' source).
     pub name: SafeString,
-    /// `unifi` (UniFi OS consoles and the Network application), `opnsense`, or `tailscale`.
+    /// `unifi` (UniFi OS consoles and the Network application), `opnsense`, `tailscale`, or
+    /// `tailscale_api`.
     #[serde(rename = "type")]
     pub kind: RouterKind,
     /// The console or controller: `https://192.168.1.1` (UniFi OS), `https://controller:8443`
-    /// (Network application), `https://opnsense.lan`. Not used for `tailscale`.
+    /// (Network application), `https://opnsense.lan`. Not used for `tailscale` or
+    /// `tailscale_api`.
     #[serde(default)]
     pub url: SafeString,
     /// Tailscale: the path to `tailscaled.sock` (default `/var/run/tailscale/tailscaled.sock`).
@@ -1157,7 +1163,11 @@ pub struct RouterConfig {
     /// UniFi: the site (default `default`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<SafeString>,
-    /// UniFi: an API key (UniFi Network 9+), or OPNsense: the API key. A file holding it.
+    /// Tailscale API: the tailnet to list devices for (`-` for the token's default tailnet).
+    #[serde(default = "default_tailnet")]
+    pub tailnet: SafeString,
+    /// UniFi: an API key (UniFi Network 9+), OPNsense: the API key, or Tailscale API: the API
+    /// access token. A file holding it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_file: Option<SafeString>,
     /// OPNsense: the API secret (a file).
@@ -1196,6 +1206,7 @@ pub enum RouterKind {
     Unifi,
     Opnsense,
     Tailscale,
+    TailscaleApi,
 }
 
 /// REQ: OBS-010 (T7.12, `spec/06` §8) — alerts: rules checked on the primary (or a standalone

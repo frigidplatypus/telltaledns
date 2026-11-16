@@ -82,20 +82,32 @@ This writes `DNSStubListener=no` to the resolved configuration.
 
 ## Tailscale device names
 
-TelltaleDNS can read the local `tailscaled` peer list and name Tailscale devices
-by their host names:
+TelltaleDNS can read Tailscale peer names either from the local `tailscaled`
+peer list or from the Tailscale API:
 
 ```nix
+# Local tailscaled socket (default on NixOS; no credentials needed)
 services.telltale.settings.router = [
   { name = "tailnet"; type = "tailscale"; }
 ];
 
-# If you use a non-standard socket path:
+# Non-standard socket path:
 # { name = "tailnet"; type = "tailscale"; socket_path = "/run/tailscale/tailscaled.sock"; }
+
+# Tailscale API (works from any host; needs an API access token)
+services.telltale.settings.router = [
+  {
+    name = "tailnet";
+    type = "tailscale_api";
+    tailnet = "example.com";                       # or "-" for the token's default tailnet
+    api_key_file = config.sops.secrets.ts-key.path; # Settings → Keys → API access token
+  }
+];
 ```
 
-The module automatically adds the `telltale` user to the `tailscale` group so it
-can reach `tailscaled.sock`. Tailscale must be enabled separately (`services.tailscale.enable = true`).
+For the local-socket mode, the module automatically adds the `telltale` user to
+the `tailscale` group so it can reach `tailscaled.sock`. Tailscale must be
+enabled separately (`services.tailscale.enable = true`).
 Discovered peers show up in the web UI at **Clients → Discovered**, with the router name as their source.
 
 ## Cluster

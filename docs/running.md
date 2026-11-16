@@ -1254,8 +1254,14 @@ api_secret_file = "/etc/telltale/opn-secret"
 name = "tailnet"
 type = "tailscale"                     # read the local tailscaled peer list
 # socket_path = "/var/run/tailscale/tailscaled.sock"   # default on Linux
+
+[[router]]
+name = "tailnet-cloud"
+type = "tailscale_api"                 # read from the Tailscale API instead
+tailnet = "example.com"                # or "-" for the token's default tailnet
+api_key_file = "/etc/telltale/ts-key"  # Settings → Keys → Auth keys → API access token
 ```
-- UniFi: the connected clients, named by the alias you gave them in UniFi, else their host name. OPNsense: the DHCP leases (Dnsmasq, Kea, or ISC, whichever is running). Tailscale: the `100.64.x.x` IPv4 addresses of your tailnet peers, named by their Tailscale host name (or DNS name if the host name is empty).
+- UniFi: the connected clients, named by the alias you gave them in UniFi, else their host name. OPNsense: the DHCP leases (Dnsmasq, Kea, or ISC, whichever is running). Tailscale (local socket or API): the `100.64.x.x` IPv4 addresses of your tailnet peers, named by their Tailscale host name (or DNS name if the host name is empty). `tailscale_api` works from any host with an API access token; `tailscale` needs `tailscaled` on the same machine.
 - A self-signed console: save its certificate (`openssl s_client -connect 192.168.1.1:443 </dev/null | openssl x509 > udm.pem`) as `tls_ca`. Its certificate names `unifi.local`, not the address you reach it at, so set `tls_server_name` to the name in it (`openssl x509 -in udm.pem -noout -ext subjectAltName` shows it): the console is then verified, and only that certificate is trusted. `tls_insecure_skip_verify = true` also works, but then anything on your network could pose as the console and receive the API key.
 - Read every `interval_secs` (300); a router that doesn't answer is asked again after 15 seconds and keeps its last list meanwhile.
 - Tailscale: the `telltale` process needs read access to `tailscaled.sock`. On NixOS add the `telltale` user to the `tailscale` group; on other systems the socket is usually root-owned and the service runs as the `telltale` user with access via group membership.

@@ -242,6 +242,7 @@ fn routers(cfg: &Config, r: &mut Report<'_>) {
             r.err(format!("{p}.name"), "must be unique and not empty");
         }
         if x.kind != crate::RouterKind::Tailscale
+            && x.kind != crate::RouterKind::TailscaleApi
             && !(x.url.starts_with("https://") || x.url.starts_with("http://"))
         {
             r.err(
@@ -266,6 +267,14 @@ fn routers(cfg: &Config, r: &mut Report<'_>) {
             crate::RouterKind::Tailscale => {
                 if x.socket_path.is_empty() {
                     r.err(format!("{p}.socket_path"), "must not be empty");
+                }
+            }
+            crate::RouterKind::TailscaleApi => {
+                if x.api_key_file.is_none() {
+                    r.err(p.clone(), "Tailscale API needs api_key_file");
+                }
+                if x.tailnet.is_empty() {
+                    r.err(format!("{p}.tailnet"), "must not be empty");
                 }
             }
         }

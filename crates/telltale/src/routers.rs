@@ -274,9 +274,8 @@ async fn localapi_get(socket_path: &str, path: &str) -> Result<Value, String> {
     let mut stream = UnixStream::connect(socket_path)
         .await
         .map_err(|e| format!("{socket_path}: {e}"))?;
-    let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: local-tailscaled.sock\r\nConnection: close\r\n\r\n"
-    );
+    let request =
+        format!("GET {path} HTTP/1.1\r\nHost: local-tailscaled.sock\r\nConnection: close\r\n\r\n");
     stream
         .write_all(request.as_bytes())
         .await
@@ -295,12 +294,9 @@ fn parse_http_json_response(buf: &[u8]) -> Result<Value, String> {
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
         .ok_or_else(|| "malformed HTTP response".to_string())?;
-    let status_end = buf
-        .iter()
-        .position(|&b| b == b'\r')
-        .unwrap_or(buf.len());
-    let status_line = std::str::from_utf8(&buf[..status_end])
-        .map_err(|_| "invalid status line".to_string())?;
+    let status_end = buf.iter().position(|&b| b == b'\r').unwrap_or(buf.len());
+    let status_line =
+        std::str::from_utf8(&buf[..status_end]).map_err(|_| "invalid status line".to_string())?;
     let status = status_line.split_whitespace().nth(1).unwrap_or("");
     if status != "200" {
         return Err(format!("HTTP {status}"));
@@ -376,6 +372,64 @@ async fn poll_tailscale(c: &RouterConfig) -> Result<Seen, String> {
     Ok(tailscale_clients(&v))
 }
 
+/// One poll of the Tailscale API.
+async fn poll_tailscale_api(
+    client: &telltale_filter::fetch::Client,
+    c: &RouterConfig,
+) -> Result<Seen, String> {
+    let key_path = c
+        .api_key_file
+        .as_ref()
+        .ok_or("Tailscale API needs api_key_file")?;
+    let key = std::fs::read_to_string(key_path.as_str())
+        .map_err(|e| format!("{key_path}: {e}"))?
+        .trim()
+        .to_owned();
+    if key.is_empty() {
+        return Err("Tailscale API key is empty".into());
+    }
+    let tailnet = c.tailnet.as_str();
+    let url = format!("https://api.tailscale.com/api/v2/tailnet/{tailnet}/devices");
+    let req = http::Request::get(&url)
+        .header("Authorization", format!("Bearer {key}"))
+        .body(Vec::new())
+        .map_err(|e| format!("bad request: {e}"))?;
+    let (_, _, v) = call(client, req).await?;
+    Ok(tailscale_api_clients(&v))
+}
+
+/// Tailscale peers in a `GET /tailnet/{tailnet}/devices` answer.
+pub(crate) fn tailscale_api_clients(v: &Value) -> Seen {
+    let Some(devices) = v.get("devices").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    devices
+        .iter()
+        .filter_map(|d| {
+            let hostname = ["hostname", "name"]
+                .iter()
+                .filter_map(|k| d.get(*k).and_then(Value::as_str))
+                .map(str::trim)
+                .find(|s| !s.is_empty())
+                .map(str::to_owned);
+            let Some(ips) = d.get("addresses").and_then(Value::as_array) else {
+                return None;
+            };
+            Some(
+                ips.iter()
+                    .filter_map(Value::as_str)
+                    .filter_map(|ip| ip.parse::<IpAddr>().ok())
+                    .filter_map(|ip| match ip {
+                        IpAddr::V4(v4) => Some((String::new(), v4, hostname.clone())),
+                        IpAddr::V6(_) => None,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .flatten()
+        .collect()
+}
+
 /// The leases view from every router's last answer.
 fn rebuild(parts: &HashMap<String, Seen>, view: &ArcSwap<Leases>) {
     let mut m = Leases::new();
@@ -419,42 +473,47 @@ pub(crate) async fn run(
         .unwrap_or(300);
     loop {
         for r in &routers {
-            let result = if r.kind == RouterKind::Tailscale {
-                poll_tailscale(r).await
-            } else {
-                let client = if r.tls_insecure_skip_verify {
-                    telltale_filter::fetch::Client::insecure(Arc::clone(&resolver))
-                } else if let Some(p) = &r.tls_ca {
-                    telltale_filter::fetch::Client::with_ca_file(Arc::clone(&resolver), p.as_str())
-                } else {
-                    telltale_filter::fetch::Client::new(Arc::clone(&resolver), &[])
-                };
-                // Like a failed poll, a TLS setting that can't load (a node without the CA file, ADR-120)
-                // is logged once until it works.
-                let client = match client {
-                    Ok(c) => c,
-                    Err(e) => {
-                        if !failing.get(r.name.as_str()).copied().unwrap_or(false) {
-                            if resolver_pod {
-                                info!(router = %r.name, error = %e, "router integration: TLS settings (not on this resolver pod; the controller reads the router)");
-                            } else {
-                                warn!(router = %r.name, error = %e, "router integration: TLS settings");
+            let result = match r.kind {
+                RouterKind::Tailscale => poll_tailscale(r).await,
+                RouterKind::TailscaleApi | RouterKind::Unifi | RouterKind::Opnsense => {
+                    let client = if r.tls_insecure_skip_verify {
+                        telltale_filter::fetch::Client::insecure(Arc::clone(&resolver))
+                    } else if let Some(p) = &r.tls_ca {
+                        telltale_filter::fetch::Client::with_ca_file(
+                            Arc::clone(&resolver),
+                            p.as_str(),
+                        )
+                    } else {
+                        telltale_filter::fetch::Client::new(Arc::clone(&resolver), &[])
+                    };
+                    // Like a failed poll, a TLS setting that can't load (a node without the CA file, ADR-120)
+                    // is logged once until it works.
+                    let client = match client {
+                        Ok(c) => c,
+                        Err(e) => {
+                            if !failing.get(r.name.as_str()).copied().unwrap_or(false) {
+                                if resolver_pod {
+                                    info!(router = %r.name, error = %e, "router integration: TLS settings (not on this resolver pod; the controller reads the router)");
+                                } else {
+                                    warn!(router = %r.name, error = %e, "router integration: TLS settings");
+                                }
                             }
+                            failing.insert(r.name.to_string(), true);
+                            continue;
                         }
-                        failing.insert(r.name.to_string(), true);
-                        continue;
+                    };
+                    // REQ: T8.2 — a console whose certificate names something other than `url`'s host.
+                    let client = client.with_server_name(
+                        r.tls_server_name
+                            .as_ref()
+                            .map(telltale_config::SafeString::as_str),
+                    );
+                    match r.kind {
+                        RouterKind::TailscaleApi => poll_tailscale_api(&client, r).await,
+                        RouterKind::Unifi => poll_unifi(&client, r).await,
+                        RouterKind::Opnsense => poll_opnsense(&client, r).await,
+                        RouterKind::Tailscale => unreachable!(),
                     }
-                };
-                // REQ: T8.2 — a console whose certificate names something other than `url`'s host.
-                let client = client.with_server_name(
-                    r.tls_server_name
-                        .as_ref()
-                        .map(telltale_config::SafeString::as_str),
-                );
-                match r.kind {
-                    RouterKind::Unifi => poll_unifi(&client, r).await,
-                    RouterKind::Opnsense => poll_opnsense(&client, r).await,
-                    RouterKind::Tailscale => unreachable!(),
                 }
             };
             let was_failing = failing.get(r.name.as_str()).copied().unwrap_or(false);
@@ -621,5 +680,52 @@ mod tests {
         let resp = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n6\r\n{\"ok\":\r\n5\r\ntrue}\r\n0\r\n\r\n";
         let v = parse_http_json_response(resp).unwrap();
         assert_eq!(v["ok"], true);
+    }
+
+    #[test]
+    fn tailscale_api_clients_named() {
+        let v = serde_json::json!({
+            "devices": [
+                {
+                    "hostname": "home-dns",
+                    "name": "home-dns.tail1234.ts.net",
+                    "addresses": ["100.64.0.1", "fd7a:115c:a1e0::1"]
+                },
+                {
+                    "hostname": "alice-phone",
+                    "name": "alice-phone.tail1234.ts.net",
+                    "addresses": ["100.64.0.2", "100.64.0.3"]
+                },
+                {
+                    "name": "printer.tail1234.ts.net",
+                    "addresses": ["100.64.0.4"]
+                }
+            ]
+        });
+        assert_eq!(
+            tailscale_api_clients(&v),
+            vec![
+                (
+                    String::new(),
+                    Ipv4Addr::new(100, 64, 0, 1),
+                    Some("home-dns".into())
+                ),
+                (
+                    String::new(),
+                    Ipv4Addr::new(100, 64, 0, 2),
+                    Some("alice-phone".into())
+                ),
+                (
+                    String::new(),
+                    Ipv4Addr::new(100, 64, 0, 3),
+                    Some("alice-phone".into())
+                ),
+                (
+                    String::new(),
+                    Ipv4Addr::new(100, 64, 0, 4),
+                    Some("printer.tail1234.ts.net".into())
+                ),
+            ]
+        );
     }
 }
